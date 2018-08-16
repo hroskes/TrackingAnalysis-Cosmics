@@ -47,8 +47,8 @@ See sample cfg files in TrackingAnalysis/Cosmics/test/hitRes*cfg
 #include "Geometry/TrackerGeometryBuilder/interface/PixelGeomDetUnit.h"
 #include "Geometry/TrackerGeometryBuilder/interface/PixelGeomDetType.h"
 #include "Geometry/CommonDetUnit/interface/GeomDetType.h"
-#include "Geometry/CommonDetUnit/interface/GeomDetUnit.h"
-#include "Geometry/TrackerTopology/interface/RectangularPixelTopology.h"
+#include "Geometry/CommonDetUnit/interface/GeomDet.h"
+#include "Geometry/TrackerGeometryBuilder/interface/RectangularPixelTopology.h"
 
 #include  "DataFormats/TrackReco/interface/TrackFwd.h"
 #include  "DataFormats/TrackReco/interface/Track.h"
@@ -57,14 +57,14 @@ See sample cfg files in TrackingAnalysis/Cosmics/test/hitRes*cfg
 #include "DataFormats/TrackingRecHit/interface/TrackingRecHit.h"
 #include "DataFormats/SiStripDetId/interface/StripSubdetector.h"
 #include "DataFormats/DetId/interface/DetId.h" 
-#include "DataFormats/SiStripDetId/interface/TIBDetId.h"
-#include "DataFormats/SiStripDetId/interface/TOBDetId.h"
-#include "DataFormats/SiStripDetId/interface/TIDDetId.h"
-#include "DataFormats/SiStripDetId/interface/TECDetId.h"
+//#include "DataFormats/SiStripDetId/interface/TIBDetId.h"
+//#include "DataFormats/SiStripDetId/interface/TOBDetId.h"
+//#include "DataFormats/SiStripDetId/interface/TIDDetId.h"
+//#include "DataFormats/SiStripDetId/interface/TECDetId.h"
 #include "DataFormats/SiPixelDetId/interface/PXBDetId.h"
 #include "DataFormats/SiPixelDetId/interface/PXFDetId.h"
 #include "Geometry/CommonDetUnit/interface/GeomDet.h"
-#include "Geometry/TrackerGeometryBuilder/interface/GluedGeomDet.h"
+#include "Geometry/CommonDetUnit/interface/GluedGeomDet.h"
 #include "TrackingTools/PatternTools/interface/Trajectory.h"
 #include "TrackingTools/TransientTrackingRecHit/interface/TransientTrackingRecHit.h"
 #include "RecoTracker/TransientTrackingRecHit/interface/TSiStripMatchedRecHit.h"
@@ -79,7 +79,8 @@ See sample cfg files in TrackingAnalysis/Cosmics/test/hitRes*cfg
 #include "TrackingTools/TrackFitters/interface/TrajectoryStateCombiner.h"
 #include "DataFormats/GeometryVector/interface/LocalPoint.h"
 #include "DataFormats/GeometryVector/interface/GlobalPoint.h"
-
+#include "DataFormats/SiStripDetId/interface/SiStripDetId.h"
+#include "Alignment/TrackerAlignment/interface/TrackerAlignableId.h"
 #include "TFile.h"
 #include "TTree.h"
 
@@ -98,12 +99,17 @@ public:
   ~HitRes();
 
 private:
+  typedef vector<Trajectory> TrajectoryCollection;
+
+
+
+  edm::EDGetTokenT<TrajectoryCollection> trajectoryToken_;
   typedef TransientTrackingRecHit::ConstRecHitPointer ConstRecHitPointer;
   virtual void analyze(const edm::Event&, const edm::EventSetup&);
   virtual void endJob() ;
 
-  virtual void analyze(const Trajectory&, const Propagator&, TrackerHitAssociator&);
-  int layerFromId (const DetId&) const;
+  virtual void analyze(const Trajectory&, const Propagator&, TrackerHitAssociator&, const TrackerTopology* const tTopo);
+  int layerFromId (const DetId&,  const TrackerTopology* const tTopo) const;
 
   // ----------member data ---------------------------
   edm::ParameterSet config_;
@@ -166,8 +172,10 @@ HitRes::HitRes(const edm::ParameterSet& iConfig) :
   config_(iConfig), rootTree_(0),
   FileInPath_("CalibTracker/SiStripCommon/data/SiStripDetInfo.dat")
 {
+  edm::ConsumesCollector&& iC = consumesCollector();
   //now do what ever initialization is needed
   trajectoryTag_ = iConfig.getParameter<edm::InputTag>("trajectories");
+  trajectoryToken_ = iC.consumes<TrajectoryCollection>(trajectoryTag_);
   doSimHit_ = iConfig.getParameter<bool>("associateStrip");
   reader=new SiStripDetInfoFileReader(FileInPath_.fullPath());
   
@@ -263,21 +271,38 @@ HitRes::analyze(const edm::Event& iEvent, const edm::EventSetup& iSetup)
   // make associator for SimHits
   //
   TrackerHitAssociator* associator;
-  if(doSimHit_) associator = new TrackerHitAssociator(iEvent, config_); else associator = 0; 
+  if(doSimHit_) {
+    TrackerHitAssociator::Config hitassociatorconfig(config_, consumesCollector());
+    associator = new TrackerHitAssociator(iEvent, hitassociatorconfig);
+  } else {
+    associator = 0;
+  }  
+
+
+
+
+
+
+
+
+//if(doSimHit_) associator = new TrackerHitAssociator(iEvent, config_); else associator = 0; 
 
   //
   // trajectories (from refit)
   //
-  typedef vector<Trajectory> TrajectoryCollection;
+  //typedef vector<Trajectory> TrajectoryCollection;
   edm::Handle<TrajectoryCollection> trajectoryCollectionHandle;
-  iEvent.getByLabel(trajectoryTag_,trajectoryCollectionHandle);
+  iEvent.getByToken(trajectoryToken_,trajectoryCollectionHandle);
   const TrajectoryCollection* trajectoryCollection = trajectoryCollectionHandle.product();
 
   //
   // loop over trajectories from refit
 cout << "Tracks: " << trajectoryCollection->size()<<endl;
-  for ( TrajectoryCollection::const_iterator it=trajectoryCollection->begin();
-	it!=trajectoryCollection->end(); ++it )  analyze(*it,propagator,*associator);
+ edm::ESHandle<TrackerTopology> tTopoHandle;
+ iSetup.get<TrackerTopologyRcd>().get(tTopoHandle);
+ const TrackerTopology* const tTopo = tTopoHandle.product(); 
+ for ( TrajectoryCollection::const_iterator it=trajectoryCollection->begin();
+	it!=trajectoryCollection->end(); ++it )  analyze(*it,propagator,*associator, tTopo);
   
   run_ = iEvent.id().run();
   event_ = iEvent.id().event();
@@ -288,7 +313,7 @@ cout << "Tracks: " << trajectoryCollection->size()<<endl;
 void
 HitRes::analyze (const Trajectory& trajectory,
 		     const Propagator& propagator,
-		     TrackerHitAssociator& associator)
+		     TrackerHitAssociator& associator,  const TrackerTopology* const tTopo)
 {
   typedef std::pair<const TrajectoryMeasurement*, const TrajectoryMeasurement*> Overlap;
   typedef vector<Overlap> OverlapContainer;
@@ -313,7 +338,7 @@ HitRes::analyze (const Trajectory& trajectory,
     //
     ConstRecHitPointer hit = itm->recHit();
     DetId id = hit->geographicalId();
-    int layer(layerFromId(id));
+    int layer(layerFromId(id, tTopo));
     int subDet = id.subdetId();
 
     if ( !hit->isValid() ) {
@@ -337,7 +362,7 @@ HitRes::analyze (const Trajectory& trajectory,
 	
 	DetId compareId = itmCompare->recHit()->geographicalId();
 	
-	if ( subDet != compareId.subdetId() || layer != layerFromId(compareId)) break;
+	if ( subDet != compareId.subdetId() || layer != layerFromId(compareId, tTopo)) break;
         if (!itmCompare->recHit()->isValid()) continue;
 	if ( (subDet<=2) || 
 	     (subDet > 2 && SiStripDetId(id).stereo()==SiStripDetId(compareId).stereo() )) {
@@ -473,12 +498,12 @@ HitRes::analyze (const Trajectory& trajectory,
     overlapIds_[0] = (*iol).first->recHit()->geographicalId().rawId();
     overlapIds_[1] = (*iol).second->recHit()->geographicalId().rawId();
     
-    if ( (*iol).first->recHit()->geographicalId().subdetId()==3 ) layer_ =  layerFromId((*iol).first->recHit()->geographicalId().rawId());
-    else if (  (*iol).first->recHit()->geographicalId().subdetId()==5 ) layer_ =  layerFromId((*iol).first->recHit()->geographicalId().rawId())+4;
-    else if ( (*iol).first->recHit()->geographicalId().subdetId()==4 ) layer_ =  layerFromId((*iol).first->recHit()->geographicalId().rawId())+10;
-    else if (  (*iol).first->recHit()->geographicalId().subdetId()==6 ) layer_ =  layerFromId((*iol).first->recHit()->geographicalId().rawId())+13;
-    else if ( (*iol).first->recHit()->geographicalId().subdetId()==1 ) layer_ =  layerFromId((*iol).first->recHit()->geographicalId().rawId())+20;
-    else if (  (*iol).first->recHit()->geographicalId().subdetId()==2 ) layer_ =  layerFromId((*iol).first->recHit()->geographicalId().rawId())+30; 
+    if ( (*iol).first->recHit()->geographicalId().subdetId()==3 ) layer_ =  layerFromId((*iol).first->recHit()->geographicalId().rawId(), tTopo);
+    else if (  (*iol).first->recHit()->geographicalId().subdetId()==5 ) layer_ =  layerFromId((*iol).first->recHit()->geographicalId().rawId(), tTopo)+4;
+    else if ( (*iol).first->recHit()->geographicalId().subdetId()==4 ) layer_ =  layerFromId((*iol).first->recHit()->geographicalId().rawId(), tTopo)+10;
+    else if (  (*iol).first->recHit()->geographicalId().subdetId()==6 ) layer_ =  layerFromId((*iol).first->recHit()->geographicalId().rawId(), tTopo)+13;
+    else if ( (*iol).first->recHit()->geographicalId().subdetId()==1 ) layer_ =  layerFromId((*iol).first->recHit()->geographicalId().rawId(), tTopo)+20;
+    else if (  (*iol).first->recHit()->geographicalId().subdetId()==2 ) layer_ =  layerFromId((*iol).first->recHit()->geographicalId().rawId(), tTopo)+30; 
     else layer_ = 99;
     
     if ( overlapIds_[0] ==  SiStripDetId((*iol).first->recHit()->geographicalId()).glued() )
@@ -486,9 +511,8 @@ HitRes::analyze (const Trajectory& trajectory,
     if ( overlapIds_[1] ==  SiStripDetId((*iol).second->recHit()->geographicalId()).glued() )
     cout << "BAD GLUED: Second Id = " <<overlapIds_[1] << " has glued = " << SiStripDetId((*iol).second->recHit()->geographicalId()).glued() << "  and stereo = " << SiStripDetId((*iol).second->recHit()->geographicalId()).stereo() << endl;
 
-    const TransientTrackingRecHit::ConstRecHitPointer firstRecHit = &(*(*iol).first->recHit());
-    const TransientTrackingRecHit::ConstRecHitPointer secondRecHit = &(*(*iol).second->recHit());
-
+    const TransientTrackingRecHit::ConstRecHitPointer firstRecHit = (*iol).first->recHit();
+    const TransientTrackingRecHit::ConstRecHitPointer secondRecHit = (*iol).second->recHit();
     hitPositions_[0] = firstRecHit->localPosition().x();
     hitErrors_[0] = sqrt(firstRecHit->localPositionError().xx());
     hitPositions_[1] = secondRecHit->localPosition().x();
@@ -503,9 +527,9 @@ HitRes::analyze (const Trajectory& trajectory,
 
     DetId id1 = (*iol).first->recHit()->geographicalId();
     DetId id2 = (*iol).second->recHit()->geographicalId();
-    int layer1 = layerFromId(id1);
+    int layer1 = layerFromId(id1, tTopo);
     int subDet1 = id1.subdetId();
-    int layer2 = layerFromId(id2);
+    int layer2 = layerFromId(id2, tTopo);
     int subDet2 = id2.subdetId();
     if (abs(hitPositions_[0])>5) cout << "BAD: Bad hit position: Id = " << id1.rawId()  << " stereo = " << SiStripDetId(id1).stereo() << "  glued = " << SiStripDetId(id1).glued() << " from subdet = " << subDet1 << " and layer = " << layer1 << endl;
     if (abs(hitPositions_[1])>5) cout << "BAD: Bad hit position: Id = " << id2.rawId()  << " stereo = " << SiStripDetId(id2).stereo() << "  glued = " << SiStripDetId(id2).glued() << " from subdet = " << subDet2 << " and layer = " << layer2 << endl;
@@ -652,7 +676,7 @@ HitRes::analyze (const Trajectory& trajectory,
       //calculate layer
       DetId id = (*iol).first->recHit()->geographicalId();
       int layer(-1);
-      layer = layerFromId(id);
+      layer = layerFromId(id, tTopo);
      int subDet = id.subdetId();
       edm::LogVerbatim("HitRes") << "Subdet = " << subDet << " ; layer = " << layer;
        
@@ -741,33 +765,13 @@ HitRes::analyze (const Trajectory& trajectory,
 }
 
 int
-HitRes::layerFromId (const DetId& id) const
+HitRes::layerFromId (const DetId& id,const TrackerTopology* const tTopo) const
 {
-  if ( id.subdetId()==PixelSubdetector::PixelBarrel ) {
-    PXBDetId tobId(id);
-    return tobId.layer();
-  }
-  else if ( id.subdetId()==PixelSubdetector::PixelEndcap ) {
-    PXFDetId tobId(id);
-    return tobId.disk() + (3*(tobId.side()-1));
-  }
-  else if ( id.subdetId()==StripSubdetector::TIB ) {
-    TIBDetId tibId(id);
-    return tibId.layer();
-  }
-  else if ( id.subdetId()==StripSubdetector::TOB ) {
-    TOBDetId tobId(id);
-    return tobId.layer();
-  }
-  else if ( id.subdetId()==StripSubdetector::TEC ) {
-    TECDetId tobId(id);
-    return tobId.wheel() + (9*(tobId.side()-1));
-  }
-  else if ( id.subdetId()==StripSubdetector::TID ) {
-    TIDDetId tobId(id);
-    return tobId.wheel() + (3*(tobId.side()-1));
-  }
-  return -1;
+  TrackerAlignableId aliid;
+  std::pair<int,int> subdetandlayer = aliid.typeAndLayerFromDetId(id, tTopo);
+  int layer = subdetandlayer.second;
+  return layer;
+  
 }
 
 void 
