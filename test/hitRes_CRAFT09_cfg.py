@@ -22,10 +22,10 @@ process.source = cms.Source("PoolSource",
 #process.load("RecoTracker.MeasurementDet.MeasurementTrackerESProducer_cfi")
 
 # Conditions (Global Tag is used here):
-process.load("Configuration.Geometry.GeometryDB_cff")
+#process.load("Configuration.Geometry.GeometryDB_cff")
 process.load("Configuration.StandardSequences.FrontierConditions_GlobalTag_cff")
 process.GlobalTag.globaltag = '101X_dataRun2_Prompt_v11'
-process.load("Configuration.StandardSequences.MagneticField_AutoFromDBCurrent_cff")
+#process.load("Configuration.StandardSequences.MagneticField_AutoFromDBCurrent_cff")
 
 #Geometry
 #process.load("Configuration.StandardSequences.Geometry_cff")
@@ -48,27 +48,8 @@ process.load("Configuration.StandardSequences.MagneticField_AutoFromDBCurrent_cf
 
 #process.load("RecoTracker.TrackProducer.TrackRefitters_cff")
 
-
 process.load("RecoVertex.BeamSpotProducer.BeamSpot_cff")
 process.load("Configuration.Geometry.GeometryDB_cff")
-process.load("RecoVertex.BeamSpotProducer.BeamSpot_cff")
-process.load("Configuration.Geometry.GeometryDB_cff")
-process.load('Configuration.StandardSequences.Services_cff')
-process.load("Configuration.StandardSequences.MagneticField_cff")
-
-
-import Alignment.CommonAlignment.tools.trackselectionRefitting as trackselRefit
-process.seqTrackselRefit = trackselRefit.getSequence(process, 'ALCARECOTkAlCosmicsCTF0T',
-                                                     isPVValidation=False,
-                                                     TTRHBuilder='WithAngleAndTemplate',
-                                                     usePixelQualityFlag=True,
-                                                     openMassWindow=False,
-                                                     cosmicsDecoMode=True,
-                                                     cosmicsZeroTesla=False,
-                                                     momentumConstraint=None,
-                                                     cosmicTrackSplitting=True,
-                                                     use_d0cut=False,
-                                                    )
 process.load('Configuration.StandardSequences.Services_cff')
 process.load("Configuration.StandardSequences.MagneticField_cff")
 
@@ -87,11 +68,14 @@ process.seqTrackselRefit = trackselRefit.getSequence(process, 'ALCARECOTkAlCosmi
                                                     )
 
 
+
+
+
 process.TFileService = cms.Service("TFileService",
     fileName = cms.string('HitRes.root')
 )
 
-process.analysis = cms.EDFilter("HitRes",
+process.analysis = cms.EDAnalyzer("HitRes",
     usePXB = cms.bool(True),
     usePXF = cms.bool(True),
     useTIB = cms.bool(True),
@@ -117,3 +101,4 @@ process.p = cms.Path(process.seqTrackselRefit*process.analysis)
 # Schedule definition
 #process.schedule = cms.Schedule(process.p,process.endjob_step)
 process.schedule = cms.Schedule(process.p)
+
